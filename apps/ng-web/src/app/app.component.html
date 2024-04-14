@@ -4,10 +4,10 @@
       <input matInput formControlName="search" type="search" />
     </mat-form-field>
 
-    <brew-color-grid-select formControlName="color" />
+    <brew-color-grid-select formControlName="color" [newColors]="newColors" />
 
     <div class="flex justify-end">
-      <button mat-raised-button type="submit">Submit</button>
+      <button mat-raised-button (click)="Submit()" type="submit">Submit</button>
     </div>
   </form>
 

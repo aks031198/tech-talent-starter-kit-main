@@ -8,13 +8,16 @@ import {
   HostListener,
   Input,
   NgZone,
+  OnChanges,
   OnDestroy,
   Output,
   QueryList,
+  SimpleChanges,
   ViewChildren,
   computed,
   inject,
   signal,
+  ChangeDetectorRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
@@ -69,12 +72,15 @@ import { Subject, takeUntil } from 'rxjs';
   ],
 })
 export class ColorGridSelectComponent
-  implements ControlValueAccessor, ColorGridSelect, AfterViewInit, OnDestroy
+  implements ControlValueAccessor, ColorGridSelect, AfterViewInit, OnDestroy, OnChanges
 {
+  constructor(private cdr: ChangeDetectorRef){}
   /** Emits when the list has been destroyed. */
   private readonly _destroyed = new Subject<void>();
-
-  private readonly _items = signal(COLOR_GRID_ITEMS);
+  @Input()
+  newColors: string[] = [];
+  
+  private _items = signal(this.initializeGrid());
   private readonly _itemSize = signal<ColorGridItemSize>(
     COLOR_GRID_ITEM_SIZES[0]
   );
@@ -126,6 +132,10 @@ export class ColorGridSelectComponent
   public set itemSize(value: ColorGridItemSize) {
     this._itemSize.set(value);
   }
+  initializeGrid(){
+    const c= [...COLOR_GRID_ITEMS ,...this.newColors];
+    return c;
+  }
 
   @Input()
   public get value(): string | null | undefined {
@@ -144,15 +154,23 @@ export class ColorGridSelectComponent
   public readonly valueChange = new EventEmitter<string | null | undefined>();
 
   /** @todo logic to generate a grid of colors to allow navigation */
-  public readonly grid = computed((): string[][] => {
+  public grid = computed((): string[][] => {
     // Calculate the number of items that can be added per row
     // The calculation will be based on the available width of the element width and itemSize
     //   this._itemsPerRow = ...
     //
-
+    this._itemsPerRow = this.calculateItemsPerRow();
     return chunk(this._items(), this._itemsPerRow);
   });
-
+  calculateItemsPerRow(){
+    var totalItems=this._items().length;
+    
+    let squareSize = 3;
+      while (squareSize * squareSize < totalItems) {
+        squareSize++;
+      }
+      return squareSize;
+   }
   public get keyMan() {
     return this._keyManager;
   }
@@ -192,37 +210,47 @@ export class ColorGridSelectComponent
       this.valueChange.emit(value);
     }
   }
-
+ ngOnChanges(changes: SimpleChanges): void {
+  if(changes['newColors']){
+     this._items= signal(this.initializeGrid());
+     this._itemsPerRow = this.calculateItemsPerRow();
+     this.grid = computed((): string[][] => {
+      return chunk(this._items(), this._itemsPerRow);
+    });
+    this.emitChange(this.newColors[this.newColors.length-1]);
+     this.cdr.detectChanges();
+   }      
+  }
   public ngAfterViewInit() {
-    this._keyManager = new FocusKeyManager(this.colorItems)
-      .withHomeAndEnd()
-      .withHorizontalOrientation('ltr')
-      .skipPredicate(() => this.disabled)
-      .withWrap();
+    // this._keyManager = new FocusKeyManager(this.colorItems)
+    //   .withHomeAndEnd()
+    //   .withHorizontalOrientation('ltr')
+    //   .skipPredicate(() => this.disabled)
+    //   .withWrap();
 
-    // Set the initial focus.
-    this._resetActiveOption();
+    // // Set the initial focus.
+    // this._resetActiveOption();
 
-    // Move the tabindex to the currently-focused list item.
-    // this._keyManager.change.subscribe((activeItemIndex) => {
-    // this._setActiveOption(activeItemIndex);
+    // // Move the tabindex to the currently-focused list item.
+    // // this._keyManager.change.subscribe((activeItemIndex) => {
+    // // this._setActiveOption(activeItemIndex);
+    // // });
+
+    // // If the active item is removed from the list, reset back to the first one.
+    // this.colorItems.changes.pipe(takeUntil(this._destroyed)).subscribe(() => {
+    //   const activeItem = this._keyManager.activeItem;
+
+    //   if (!activeItem || this.colorItems.toArray().indexOf(activeItem) === -1) {
+    //     this._resetActiveOption();
+    //   }
     // });
 
-    // If the active item is removed from the list, reset back to the first one.
-    this.colorItems.changes.pipe(takeUntil(this._destroyed)).subscribe(() => {
-      const activeItem = this._keyManager.activeItem;
-
-      if (!activeItem || this.colorItems.toArray().indexOf(activeItem) === -1) {
-        this._resetActiveOption();
-      }
-    });
-
-    // These events are bound outside the zone, because they don't change
-    // any change-detected properties and they can trigger timeouts.
-    this._ngZone.runOutsideAngular(() => {
-      this._el.nativeElement.addEventListener('focusin', this._handleFocusin);
-      this._el.nativeElement.addEventListener('focusout', this._handleFocusout);
-    });
+    // // These events are bound outside the zone, because they don't change
+    // // any change-detected properties and they can trigger timeouts.
+    // this._ngZone.runOutsideAngular(() => {
+    //   this._el.nativeElement.addEventListener('focusin', this._handleFocusin);
+    //   this._el.nativeElement.addEventListener('focusout', this._handleFocusout);
+    // });
   }
 
   public ngOnDestroy() {
@@ -244,18 +272,54 @@ export class ColorGridSelectComponent
    */
   @HostListener('keydown', ['$event'])
   private _onKeydown(event: KeyboardEvent) {
-    switch (event.keyCode) {
-      case UP_ARROW:
-      case DOWN_ARROW:
-      case LEFT_ARROW:
-      case RIGHT_ARROW: {
-        // add logic
-        // ....
-
-        this._keyManager.onKeydown(event); // @fixme remove the following after the grid logic is implemented
+    const index=this.findIndex();
+    const numRows = this.grid().length;
+    const numCols = this.grid()[0].length;
+    switch (event.key) {
+      case 'ArrowUp': {
+        if (index.row !== -1 && index.column !== -1) { 
+          const newRow = (index.row-1 + numRows)%numRows;
+          const newCol = index.column
+          this.emitChange(this.grid()[newRow][newCol]);  
+        }
+        break;
+      }
+      case 'ArrowDown': {
+        if (index.row !== -1 && index.column !== -1) { 
+          const newRow = (index.row+1 + numRows)%numRows;
+          const newCol = index.column
+          this.emitChange(this.grid()[newRow][newCol]);  
+        }
+        break;
+      }
+      case 'ArrowLeft':{
+        if (index.row !== -1 && index.column !== -1) { 
+          const newRow = index.row;
+          const newCol = (index.column - 1 + numCols) % numCols;
+          this.emitChange(this.grid()[newRow][newCol]);  
+        }
+        break;
+      }
+      case 'ArrowRight': {
+        if (index.row !== -1 && index.column !== -1) { 
+          const newRow = index.row;
+          const newCol = (index.column + 1 + numCols) % numCols;
+          this.emitChange(this.grid()[newRow][newCol]);  
+        }
         break;
       }
     }
+  }
+
+   public findIndex() {
+    for (let i = 0; i < this.grid().length; i++) {
+      for (let j = 0; j < this.grid()[i].length; j++) {
+        if (this.grid()[i][j] === this.value) {
+          return { row: i, column: j };
+        }
+      }
+    }
+    return {row: -1,column: -1};
   }
 
   /** Handles focusout events within the list. */
